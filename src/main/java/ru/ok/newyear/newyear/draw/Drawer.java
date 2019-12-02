@@ -39,6 +39,9 @@ public class Drawer {
             case CENTER_CROP:
                 drawCenterCrop(graphics, backgroundImage.getWidth(), backgroundImage.getHeight(), foregroundImage);
                 break;
+            case BOTTOM:
+                drawBottom(graphics, backgroundImage.getWidth(), backgroundImage.getHeight(), foregroundImage);
+                break;
             default:
                 logger.error("Unknown draw type {}", draw.position);
                 graphics.dispose();
@@ -65,6 +68,18 @@ public class Drawer {
 
         float left = (width - scaledWidth) / 2;
         float top = (height - scaledHeight) / 2;
+
+        graphics.drawImage(foregroundImage, (int) left, (int) top, (int) scaledWidth, (int) scaledHeight, null);
+    }
+
+    private static void drawBottom(@NonNull Graphics graphics, int width, int height, @NonNull BufferedImage foregroundImage) {
+        float scale = (float) width / foregroundImage.getWidth();
+
+        float scaledWidth = scale * foregroundImage.getWidth();
+        float scaledHeight = scale * foregroundImage.getHeight();
+
+        float left = (width - scaledWidth) / 2;
+        float top = height - scaledHeight;
 
         graphics.drawImage(foregroundImage, (int) left, (int) top, (int) scaledWidth, (int) scaledHeight, null);
     }

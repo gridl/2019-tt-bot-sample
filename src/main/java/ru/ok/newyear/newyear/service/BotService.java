@@ -250,7 +250,7 @@ public class BotService implements DisposableBean {
             return;
         }
         sendText(chatId, START_MAGIC_TEXT);
-        File result = Drawer.drawOverImage(file, Draw.SNOW);
+        File result = Drawer.drawOverImage(file, Draw.random());
         if (result == null) {
             sendText(chatId, ERROR_TRY_LATER_TEXT);
             return;
