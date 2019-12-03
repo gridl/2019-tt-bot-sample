@@ -2,6 +2,7 @@ package ru.ok.newyear.newyear.utils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.lang.Nullable;
 
 import java.io.*;
 
@@ -12,10 +13,14 @@ public class Properties {
     private static final String UPDATE_MARKER = "updateMarker";
     private static final String BOT_PROPERTIES = "bot.properties";
 
-    public static void setUpdateMarker(long marker) {
+    public static void setUpdateMarker(@Nullable Long marker) {
         logger.info("Set update marker {}", marker);
         java.util.Properties properties = new java.util.Properties();
-        properties.setProperty(UPDATE_MARKER, String.valueOf(marker));
+        if (marker == null) {
+            properties.setProperty(UPDATE_MARKER, null);
+        } else {
+            properties.setProperty(UPDATE_MARKER, String.valueOf(marker));
+        }
         try (OutputStream output = new FileOutputStream(BOT_PROPERTIES)) {
             properties.store(output, null);
         } catch (IOException e) {
@@ -23,11 +28,12 @@ public class Properties {
         }
     }
 
-    public static long getUpdateMarker() {
+    @Nullable
+    public static Long getUpdateMarker() {
         logger.info("Get update marker");
         File file = new File(BOT_PROPERTIES);
         if (!file.exists()) {
-            return 0;
+            return null;
         }
         String value = null;
         try (InputStream input = new FileInputStream(BOT_PROPERTIES)) {
@@ -39,13 +45,13 @@ public class Properties {
         }
         if (value == null) {
             logger.info("No value. Return 0");
-            return 0;
+            return null;
         }
         try {
             return Long.parseLong(value);
         } catch (NumberFormatException e) {
             logger.error(String.format("Can't parse %s to long", value), e);
         }
-        return 0;
+        return null;
     }
 }

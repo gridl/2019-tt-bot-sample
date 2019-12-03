@@ -36,15 +36,15 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 @Service
-public class BotService implements DisposableBean {
+public class BotService implements DisposableBean, Update.Visitor {
 
     private static final Logger logger = LoggerFactory.getLogger(BotService.class);
 
     private static final int MAX_FILE_SEND_ERROR_COUNT = 30;
     private static final int FILE_SEND_RETRY_TIMEOUT = 500;
+    private static final int ERROR_TIMEOUT = 500;
     private static final CompositeDisposable compositeDisposable = new CompositeDisposable();
     public static final String MAGIC_ON_PHOTO_TEXT = "Что бы применить магию на фото - просто пришли мне его";
-    public static final String START_MAGIC_TEXT = "Начинаю колдовать...";
     public static final String ERROR_TRY_LATER_TEXT = "Возникла ошибка. Попробуйте позже";
 
     private final DownloaderService downloaderService;
@@ -79,13 +79,13 @@ public class BotService implements DisposableBean {
                 .observeOn(Schedulers.io())
                 .subscribeOn(Schedulers.io())
                 .flatMap(Observable::fromIterable)
-                .subscribe(this::handleUpdate, throwable -> logger.error("Error while check updates", throwable));
+                .subscribe((update -> update.visit(this)), throwable -> logger.error("Error while check updates", throwable));
     }
 
     @NonNull
     private List<Update> getUpdates() {
         logger.info("Get updates");
-        long marker = Properties.getUpdateMarker();
+        Long marker = Properties.getUpdateMarker();
         logger.info("Old Update marker = {}", marker);
         UpdateList updateList;
         try {
@@ -94,6 +94,11 @@ public class BotService implements DisposableBean {
                     .execute();
         } catch (APIException | ClientException e) {
             logger.error("Can't get updates", e);
+            try {
+                Thread.sleep(ERROR_TIMEOUT);
+            } catch (InterruptedException ex) {
+                logger.error("Can't sleep", ex);
+            }
             return Collections.emptyList();
         }
         if (updateList == null) {
@@ -101,11 +106,8 @@ public class BotService implements DisposableBean {
             return Collections.emptyList();
         }
         Long newMarker = updateList.getMarker();
-        if (newMarker == null) {
-            newMarker = 0L;
-        }
         logger.info("New update marker = {}", newMarker);
-        if (marker != newMarker) {
+        if (!Objects.equals(marker, newMarker)) {
             Properties.setUpdateMarker(newMarker);
         }
         List<Update> updates = updateList.getUpdates();
@@ -114,84 +116,6 @@ public class BotService implements DisposableBean {
             return Collections.emptyList();
         }
         return updates;
-    }
-
-    private void handleUpdate(@NonNull Update update) {
-        logger.info("Handle update {}", update);
-        switch (update.getType()) {
-            case Update.BOT_STARTED:
-                handleBotStartedUpdate((BotStartedUpdate) update);
-                break;
-            case Update.MESSAGE_CREATED:
-                handleMessageCreatedUpdate((MessageCreatedUpdate) update);
-                break;
-            case Update.MESSAGE_CALLBACK:
-                handleMessageCallback((MessageCallbackUpdate) update);
-                break;
-            default:
-                logger.info("Ignore {} type", update.getType());
-                break;
-        }
-    }
-
-    private void handleMessageCallback(@NonNull MessageCallbackUpdate update) {
-        logger.info("Handle message callback update");
-        Message message = update.getMessage();
-        if (message == null) {
-            logger.error("Message is null");
-            return;
-        }
-        Long chatId = getChatId(message);
-        if (chatId == null) {
-            logger.error("ChatId is null");
-            return;
-        }
-        Callback callback = update.getCallback();
-        if (callback == null) {
-            logger.error("Callback is null");
-            return;
-        }
-        String payload = callback.getPayload();
-        if (Texts.isEmpty(payload)) {
-            logger.error("Payload is empty");
-            return;
-        }
-        processPhoto(payload, chatId);
-    }
-
-    private void handleMessageCreatedUpdate(@NonNull MessageCreatedUpdate update) {
-        logger.info("Handle message created update");
-        Message message = update.getMessage();
-        if (message == null) {
-            logger.error("Message is null");
-            return;
-        }
-        Long chatId = getChatId(message);
-        if (chatId == null) {
-            logger.error("ChatId is null");
-            return;
-        }
-        String url = null;
-        MessageBody messageBody = message.getBody();
-        if (messageBody != null) {
-            url = getImageUrlFromAttaches(messageBody.getAttachments());
-        }
-        if (!Texts.isEmpty(url)) {
-            processPhoto(url, chatId);
-            return;
-        }
-        LinkedMessage linkedMessage = message.getLink();
-        if (linkedMessage != null) {
-            messageBody = linkedMessage.getMessage();
-            if (messageBody != null) {
-                url = getImageUrlFromAttaches(messageBody.getAttachments());
-            }
-        }
-        if (!Texts.isEmpty(url)) {
-            processPhoto(url, chatId);
-            return;
-        }
-        sendText(chatId, MAGIC_ON_PHOTO_TEXT);
     }
 
     @Nullable
@@ -232,24 +156,12 @@ public class BotService implements DisposableBean {
         return null;
     }
 
-    private void handleBotStartedUpdate(@NonNull BotStartedUpdate update) {
-        logger.info("Handle bot started update");
-        long chatId = update.getChatId();
-        String url = getAvatarUrl(chatId);
-        if (Texts.isEmpty(url)) {
-            sendText(chatId, MAGIC_ON_PHOTO_TEXT);
-            return;
-        }
-        processPhoto(url, chatId);
-    }
-
     private void processPhoto(@NonNull String url, long chatId) {
         File file = downloaderService.downloadFile(url);
         if (!file.exists()) {
             sendText(chatId, MAGIC_ON_PHOTO_TEXT);
             return;
         }
-        sendText(chatId, START_MAGIC_TEXT);
         File result = Drawer.drawOverImage(file, Draw.random());
         if (result == null) {
             sendText(chatId, ERROR_TRY_LATER_TEXT);
@@ -361,4 +273,118 @@ public class BotService implements DisposableBean {
         return null;
     }
 
+    @Override
+    public void visit(MessageCreatedUpdate update) {
+        logger.info("Handle message created update");
+        Message message = update.getMessage();
+        if (message == null) {
+            logger.error("Message is null");
+            return;
+        }
+        Long chatId = getChatId(message);
+        if (chatId == null) {
+            logger.error("ChatId is null");
+            return;
+        }
+        String url = null;
+        MessageBody messageBody = message.getBody();
+        if (messageBody != null) {
+            url = getImageUrlFromAttaches(messageBody.getAttachments());
+        }
+        if (!Texts.isEmpty(url)) {
+            processPhoto(url, chatId);
+            return;
+        }
+        LinkedMessage linkedMessage = message.getLink();
+        if (linkedMessage != null) {
+            messageBody = linkedMessage.getMessage();
+            if (messageBody != null) {
+                url = getImageUrlFromAttaches(messageBody.getAttachments());
+            }
+        }
+        if (!Texts.isEmpty(url)) {
+            processPhoto(url, chatId);
+            return;
+        }
+        sendText(chatId, MAGIC_ON_PHOTO_TEXT);
+    }
+
+    @Override
+    public void visit(MessageCallbackUpdate update) {
+        logger.info("Handle message callback update");
+        Message message = update.getMessage();
+        if (message == null) {
+            logger.error("Message is null");
+            return;
+        }
+        Long chatId = getChatId(message);
+        if (chatId == null) {
+            logger.error("ChatId is null");
+            return;
+        }
+        Callback callback = update.getCallback();
+        if (callback == null) {
+            logger.error("Callback is null");
+            return;
+        }
+        String payload = callback.getPayload();
+        if (Texts.isEmpty(payload)) {
+            logger.error("Payload is empty");
+            return;
+        }
+        processPhoto(payload, chatId);
+    }
+
+    @Override
+    public void visit(MessageEditedUpdate model) {
+        logger.info("Ignore MessageEditedUpdate");
+    }
+
+    @Override
+    public void visit(MessageRemovedUpdate model) {
+        logger.info("Ignore MessageRemovedUpdate");
+    }
+
+    @Override
+    public void visit(BotAddedToChatUpdate model) {
+        logger.info("Ignore BotAddedToChatUpdate");
+    }
+
+    @Override
+    public void visit(BotRemovedFromChatUpdate model) {
+        logger.info("Ignore BotRemovedFromChatUpdate");
+    }
+
+    @Override
+    public void visit(UserAddedToChatUpdate model) {
+        logger.info("Ignore UserAddedToChatUpdate");
+    }
+
+    @Override
+    public void visit(UserRemovedFromChatUpdate model) {
+        logger.info("Ignore UserRemovedFromChatUpdate");
+    }
+
+    @Override
+    public void visit(BotStartedUpdate update) {
+        logger.info("Handle bot started update");
+        long chatId = update.getChatId();
+        String url = getAvatarUrl(chatId);
+        if (Texts.isEmpty(url)) {
+            sendText(chatId, MAGIC_ON_PHOTO_TEXT);
+        } else {
+            processPhoto(url, chatId);
+            sendText(chatId, MAGIC_ON_PHOTO_TEXT);
+        }
+    }
+
+    @Override
+    public void visit(ChatTitleChangedUpdate model) {
+        logger.info("Ignore ChatTitleChangedUpdate");
+    }
+
+    @Override
+    public void visitDefault(Update model) {
+        logger.info("Ignore visitDefault");
+    }
 }

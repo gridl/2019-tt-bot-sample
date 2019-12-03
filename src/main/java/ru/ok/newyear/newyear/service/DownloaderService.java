@@ -4,6 +4,8 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
+import okio.BufferedSink;
+import okio.Okio;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.lang.NonNull;
@@ -11,10 +13,7 @@ import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 import ru.ok.newyear.newyear.utils.Files;
 
-import java.io.Closeable;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
 
 @Service
 public class DownloaderService {
@@ -61,14 +60,14 @@ public class DownloaderService {
             response.close();
             return file;
         }
-        FileOutputStream outputStream = null;
+        BufferedSink sink = null;
         try {
-            outputStream = new FileOutputStream(file);
-            outputStream.write(body.bytes());
+            sink = Okio.buffer(Okio.sink(file));
+            sink.writeAll(body.source());
         } catch (IOException e) {
             logger.error(String.format("Can't download file %s", url), e);
         } finally {
-            closeSilently(outputStream);
+            closeSilently(sink);
         }
         response.close();
         logger.info("Created new file {}", file.getPath());
